@@ -139,7 +139,7 @@ type MintReq struct {
 }
 
 type MintResp struct {
-	ID       string `json:"id"`
+	ID       int64  `json:"id"`
 	Token    string `json:"token"`
 	URL      string `json:"url,omitempty"`
 	Hint     string `json:"hint,omitempty"`
@@ -148,7 +148,7 @@ type MintResp struct {
 }
 
 type TokenListItem struct {
-	ID        string `json:"id"`
+	ID        int64  `json:"id"`
 	Hint      string `json:"hint"`
 	Uses      int    `json:"uses"`
 	MaxUses   int    `json:"max_uses"`
@@ -158,7 +158,7 @@ type TokenListItem struct {
 }
 
 type ResponseListItem struct {
-	ID          string         `json:"id"`
+	ID          int64          `json:"id"`
 	SubmittedAt string         `json:"submitted_at"`
 	TokenHint   string         `json:"token_hint"`
 	Answers     map[string]any `json:"answers"`

@@ -547,7 +547,7 @@ func cmdTokens() error {
 		if t.MaxUses == 0 {
 			usage = fmt.Sprintf("%d/∞", t.Uses)
 		}
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%t\n", t.ID, t.Hint, usage, t.ExpiresAt, t.Revoked)
+		fmt.Fprintf(tw, "%d\t%s\t%s\t%s\t%t\n", t.ID, t.Hint, usage, t.ExpiresAt, t.Revoked)
 	}
 	return tw.Flush()
 }
@@ -605,7 +605,7 @@ func cmdResponses() error {
 	tw := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
 	fmt.Fprintln(tw, "ID\tSUBMITTED_AT\tTOKEN_HINT\tFIELDS_SUMMARY")
 	for _, r := range items {
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", r.ID, r.SubmittedAt, r.TokenHint, summarizeAnswers(r.Answers))
+		fmt.Fprintf(tw, "%d\t%s\t%s\t%s\n", r.ID, r.SubmittedAt, r.TokenHint, summarizeAnswers(r.Answers))
 	}
 	return tw.Flush()
 }
