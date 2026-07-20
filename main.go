@@ -72,6 +72,8 @@ func main() {
 		err = cmdFreeze()
 	case "list", "ls":
 		err = cmdList()
+	case "materials":
+		err = cmdMaterials()
 	case "mint":
 		err = cmdMint()
 	case "tokens":
@@ -868,4 +870,183 @@ func humanSize(n int64) string {
 	default:
 		return fmt.Sprintf("%.1f GB", float64(n)/(1024*1024*1024))
 	}
+}
+
+// ── materials subcommands ─────────────────────────────────────────────
+
+// cmdMaterials dispatches `gforms materials <slug> [subcmd] ...`.
+// With just a slug it lists; otherwise the second arg picks a verb.
+func cmdMaterials() error {
+	args := os.Args[1:]
+	if len(args) < 1 {
+		return fmt.Errorf("usage: gforms materials <slug> [add PATH [--label L] | rm <id> | fetch <id> [-o FILE]]")
+	}
+	slug := args[0]
+	if len(args) == 1 {
+		return materialsList(slug)
+	}
+	sub := args[1]
+	rest := args[2:]
+	switch sub {
+	case "add":
+		return materialsAdd(slug, rest)
+	case "rm", "delete":
+		return materialsRm(slug, rest)
+	case "fetch", "download":
+		return materialsFetch(slug, rest)
+	default:
+		return fmt.Errorf("unknown materials subcommand: %s (want: add|rm|fetch)", sub)
+	}
+}
+
+func materialsList(slug string) error {
+	c, err := newAPIClient()
+	if err != nil {
+		return err
+	}
+	mats, err := c.MaterialsList(slug)
+	if err != nil {
+		return err
+	}
+	if len(mats) == 0 {
+		fmt.Println("(no materials)")
+		return nil
+	}
+	tw := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
+	fmt.Fprintln(tw, "ID\tLABEL\tFILENAME\tMIME\tSIZE\tSHA256")
+	for _, m := range mats {
+		fmt.Fprintf(tw, "%d\t%s\t%s\t%s\t%s\t%s\n",
+			m.ID, m.Label, m.Filename, m.Mime, humanSize(m.Size), shortSHA(m.SHA256))
+	}
+	return tw.Flush()
+}
+
+func materialsAdd(slug string, args []string) error {
+	if len(args) < 1 {
+		return fmt.Errorf("usage: gforms materials <slug> add PATH [--label LABEL]")
+	}
+	path := args[0]
+	label := ""
+	for i := 1; i < len(args); i++ {
+		a := args[i]
+		switch {
+		case a == "--label":
+			if i+1 >= len(args) {
+				return fmt.Errorf("--label requires a value")
+			}
+			label = args[i+1]
+			i++
+		case strings.HasPrefix(a, "--label="):
+			label = strings.TrimPrefix(a, "--label=")
+		default:
+			return fmt.Errorf("unknown arg: %s", a)
+		}
+	}
+	if _, err := os.Stat(path); err != nil {
+		return fmt.Errorf("path: %w", err)
+	}
+	c, err := newAPIClient()
+	if err != nil {
+		return err
+	}
+	m, err := c.MaterialUpload(slug, path, label)
+	if err != nil {
+		return err
+	}
+	return prettyJSON(m)
+}
+
+func materialsRm(slug string, args []string) error {
+	if len(args) < 1 {
+		return fmt.Errorf("usage: gforms materials <slug> rm <material-id>")
+	}
+	id, err := strconv.ParseInt(args[0], 10, 64)
+	if err != nil {
+		return fmt.Errorf("material id: %w", err)
+	}
+	c, err := newAPIClient()
+	if err != nil {
+		return err
+	}
+	if err := c.MaterialDelete(slug, id); err != nil {
+		return err
+	}
+	fmt.Printf("deleted material %d from %s\n", id, slug)
+	return nil
+}
+
+func materialsFetch(slug string, args []string) error {
+	if len(args) < 1 {
+		return fmt.Errorf("usage: gforms materials <slug> fetch <id> [-o FILE]")
+	}
+	_ = slug // slug is context; admin fetch is by material id only.
+	id, err := strconv.ParseInt(args[0], 10, 64)
+	if err != nil {
+		return fmt.Errorf("material id: %w", err)
+	}
+	dst := ""
+	for i := 1; i < len(args); i++ {
+		a := args[i]
+		switch {
+		case a == "-o" || a == "--output":
+			if i+1 >= len(args) {
+				return fmt.Errorf("%s requires a value", a)
+			}
+			dst = args[i+1]
+			i++
+		case strings.HasPrefix(a, "--output="):
+			dst = strings.TrimPrefix(a, "--output=")
+		default:
+			return fmt.Errorf("unknown arg: %s", a)
+		}
+	}
+	c, err := newAPIClient()
+	if err != nil {
+		return err
+	}
+	// Two-pass: stream to a temp file so we can honor the server's filename.
+	tmp, err := os.CreateTemp("", "gforms-material-*")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmp.Name()
+	filename, _, err := c.MaterialFetch(id, tmp)
+	tmp.Close()
+	if err != nil {
+		os.Remove(tmpPath)
+		return err
+	}
+	if dst == "" {
+		if filename != "" {
+			dst = filename
+		} else {
+			dst = fmt.Sprintf("material-%d", id)
+		}
+	}
+	if err := os.Rename(tmpPath, dst); err != nil {
+		// Cross-device fallback.
+		if cerr := copyFile(tmpPath, dst); cerr != nil {
+			os.Remove(tmpPath)
+			return cerr
+		}
+		os.Remove(tmpPath)
+	}
+	abs, _ := filepath.Abs(dst)
+	fmt.Printf("wrote %s\n", abs)
+	return nil
+}
+
+func copyFile(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	out, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+	_, err = io.Copy(out, in)
+	return err
 }
