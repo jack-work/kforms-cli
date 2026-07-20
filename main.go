@@ -362,7 +362,19 @@ func cmdEdit() error {
 	if err != nil {
 		return err
 	}
-	body, err := form.DumpYAML(current)
+	// Round-trip materials as sha256 entries.
+	existingMats, err := c.MaterialsList(slug)
+	if err != nil {
+		return fmt.Errorf("list materials: %w", err)
+	}
+	doc := &form.Doc{Form: current}
+	for _, m := range existingMats {
+		doc.Materials = append(doc.Materials, form.MaterialSpec{
+			SHA256: m.SHA256,
+			Label:  m.Label,
+		})
+	}
+	body, err := form.DumpDoc(doc)
 	if err != nil {
 		return err
 	}
@@ -397,12 +409,15 @@ func cmdEdit() error {
 		return fmt.Errorf("editor exited non-zero: %w", err)
 	}
 
-	edited, err := form.LoadYAML(tmpPath)
+	edited, err := form.LoadDoc(tmpPath)
 	if err != nil {
 		return fmt.Errorf("re-parse edited yaml: %w", err)
 	}
-	updated, err := c.FormUpdate(slug, edited)
+	updated, err := c.FormUpdate(slug, edited.Form)
 	if err != nil {
+		return err
+	}
+	if err := syncMaterials(c, slug, edited, existingMats); err != nil {
 		return err
 	}
 	return prettyJSON(updated)
