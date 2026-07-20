@@ -11,10 +11,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"mime"
+	stdmime "mime"
+	"mime/multipart"
 	"net/http"
+	"net/textproto"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -157,6 +160,18 @@ type TokenListItem struct {
 	CreatedAt string `json:"created_at"`
 }
 
+// Material mirrors a form's reference document on the wire.
+type Material struct {
+	ID        int64  `json:"id"`
+	Filename  string `json:"filename"`
+	Label     string `json:"label,omitempty"`
+	Mime      string `json:"mime"`
+	Size      int64  `json:"size"`
+	SHA256    string `json:"sha256"`
+	Ord       int    `json:"ord"`
+	CreatedAt string `json:"created_at,omitempty"`
+}
+
 type ResponseListItem struct {
 	ID          int64          `json:"id"`
 	SubmittedAt string         `json:"submitted_at"`
@@ -246,6 +261,162 @@ func (c *Client) ResponseGet(id string) (json.RawMessage, error) {
 	return raw, err
 }
 
+// ── material endpoints ──────────────────────────────────────────────────
+
+func (c *Client) MaterialsList(slug string) ([]Material, error) {
+	var out []Material
+	err := c.do(http.MethodGet, "/forms/"+slug+"/materials", nil, &out)
+	return out, err
+}
+
+// MaterialUpload streams a file as multipart/form-data. The server
+// dedups by (form, sha256) — 200 with the existing row is treated as
+// success by the caller. label is optional; when empty the server
+// falls back to the basename of the uploaded file.
+func (c *Client) MaterialUpload(slug, path, label string) (*Material, error) {
+	var attempt func(retry bool) (*Material, error)
+	attempt = func(retry bool) (*Material, error) {
+		tok, err := c.Resolver.Resolve()
+		if err != nil {
+			return nil, err
+		}
+
+		f, err := os.Open(path)
+		if err != nil {
+			return nil, fmt.Errorf("open %s: %w", path, err)
+		}
+		defer f.Close()
+
+		pr, pw := io.Pipe()
+		mw := multipart.NewWriter(pw)
+		filename := filepath.Base(path)
+
+		// Determine per-part Content-Type from extension.
+		ct := stdmime.TypeByExtension(filepath.Ext(filename))
+		if ct == "" {
+			ct = "application/octet-stream"
+		}
+
+		writeErr := make(chan error, 1)
+		go func() {
+			defer pw.Close()
+			defer mw.Close()
+			if label != "" {
+				if err := mw.WriteField("label", label); err != nil {
+					writeErr <- err
+					return
+				}
+			}
+			hdr := make(textproto.MIMEHeader)
+			hdr.Set("Content-Disposition", fmt.Sprintf(`form-data; name="file"; filename=%q`, filename))
+			hdr.Set("Content-Type", ct)
+			part, err := mw.CreatePart(hdr)
+			if err != nil {
+				writeErr <- err
+				return
+			}
+			if _, err := io.Copy(part, f); err != nil {
+				writeErr <- err
+				return
+			}
+			writeErr <- nil
+		}()
+
+		req, err := http.NewRequest(http.MethodPost, c.Base+"/forms/"+slug+"/materials", pr)
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("Authorization", "Bearer "+tok)
+		req.Header.Set("Accept", "application/json")
+		req.Header.Set("Content-Type", mw.FormDataContentType())
+
+		resp, err := c.HTTP.Do(req)
+		if err != nil {
+			return nil, fmt.Errorf("POST /forms/%s/materials: %w", slug, err)
+		}
+		defer resp.Body.Close()
+		if werr := <-writeErr; werr != nil {
+			return nil, fmt.Errorf("multipart write: %w", werr)
+		}
+
+		if resp.StatusCode == http.StatusUnauthorized && !retry {
+			if err := c.Resolver.Invalidate(tok); err != nil {
+				return nil, fmt.Errorf("token rejected and refresh failed: %w", err)
+			}
+			return attempt(true)
+		}
+
+		bs, _ := io.ReadAll(resp.Body)
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			return nil, errors.New(strings.TrimSpace(string(bs)))
+		}
+		var m Material
+		if err := json.Unmarshal(bs, &m); err != nil {
+			return nil, fmt.Errorf("decode material response: %w (body: %s)", err, string(bs))
+		}
+		return &m, nil
+	}
+	return attempt(false)
+}
+
+func (c *Client) MaterialDelete(slug string, id int64) error {
+	return c.do(http.MethodDelete, "/forms/"+slug+"/materials/"+strconv.FormatInt(id, 10), nil, nil)
+}
+
+// MaterialFetch streams a material (admin download) to out. Returns the
+// server-provided filename (from Content-Disposition, if present) and
+// the response's Content-Type.
+func (c *Client) MaterialFetch(id int64, out io.Writer) (string, string, error) {
+	tok, err := c.Resolver.Resolve()
+	if err != nil {
+		return "", "", err
+	}
+	url := c.Base + "/materials/" + strconv.FormatInt(id, 10)
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		return "", "", err
+	}
+	req.Header.Set("Authorization", "Bearer "+tok)
+
+	resp, err := c.HTTP.Do(req)
+	if err != nil {
+		return "", "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusUnauthorized {
+		_ = c.Resolver.Invalidate(tok)
+		tok, err = c.Resolver.Resolve()
+		if err != nil {
+			return "", "", err
+		}
+		req.Header.Set("Authorization", "Bearer "+tok)
+		resp, err = c.HTTP.Do(req)
+		if err != nil {
+			return "", "", err
+		}
+		defer resp.Body.Close()
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		bs, _ := io.ReadAll(resp.Body)
+		return "", "", errors.New(strings.TrimSpace(string(bs)))
+	}
+
+	filename := ""
+	if cd := resp.Header.Get("Content-Disposition"); cd != "" {
+		if _, params, err := stdmime.ParseMediaType(cd); err == nil {
+			if name := params["filename"]; name != "" {
+				filename = filepath.Base(name)
+			}
+		}
+	}
+	ctype := resp.Header.Get("Content-Type")
+	if _, err := io.Copy(out, resp.Body); err != nil {
+		return filename, ctype, err
+	}
+	return filename, ctype, nil
+}
+
 // ── blob fetch ──────────────────────────────────────────────────────────
 
 // BlobFetch streams a blob to dst. If dst is empty, the server's
@@ -290,7 +461,7 @@ func (c *Client) BlobFetch(id, dst string) (string, error) {
 	if dst == "" {
 		dst = id
 		if cd := resp.Header.Get("Content-Disposition"); cd != "" {
-			if _, params, err := mime.ParseMediaType(cd); err == nil {
+			if _, params, err := stdmime.ParseMediaType(cd); err == nil {
 				if name := params["filename"]; name != "" {
 					dst = filepath.Base(name)
 				}
