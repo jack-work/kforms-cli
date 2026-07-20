@@ -10,9 +10,12 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -328,7 +331,7 @@ func cmdCreate() error {
 	if path == "" {
 		return fmt.Errorf("usage: gforms create -f FILE.yaml")
 	}
-	f, err := form.LoadYAML(path)
+	f, err := form.LoadDoc(path)
 	if err != nil {
 		return err
 	}
@@ -336,8 +339,11 @@ func cmdCreate() error {
 	if err != nil {
 		return err
 	}
-	created, err := c.FormCreate(f)
+	created, err := c.FormCreate(f.Form)
 	if err != nil {
+		return err
+	}
+	if err := syncMaterials(c, created.Slug, f, nil); err != nil {
 		return err
 	}
 	return prettyJSON(created)
@@ -713,4 +719,138 @@ func cmdFetch() error {
 	abs, _ := filepath.Abs(path)
 	fmt.Printf("wrote %s\n", abs)
 	return nil
+}
+
+// ── materials sync helper ─────────────────────────────────────────────
+
+// syncMaterials reconciles the given form's server-side materials with
+// the parsed doc's `materials:` array.
+//
+//   - `path` entries are uploaded (server dedups by sha).
+//   - `sha256` entries must already exist on the server after uploads;
+//     otherwise we fail loud.
+//   - Server-side materials not represented in the YAML are deleted.
+//
+// When existing != nil the caller has already fetched the current list
+// (used by `edit`); otherwise we skip deletions (create path — a fresh
+// form has nothing to delete). Order: uploads first, deletes last.
+func syncMaterials(c *api.Client, slug string, d *form.Doc, existing []api.Material) error {
+	total := len(d.Materials)
+	wanted := make(map[string]bool)
+
+	for i, m := range d.Materials {
+		idx := i + 1
+		if m.Path != "" {
+			resolved := m.ResolvedPath(d.BaseDir)
+			if _, err := os.Stat(resolved); err != nil {
+				return fmt.Errorf("material[%d] path: %w", i, err)
+			}
+			localSHA, size, err := fileSHA256(resolved)
+			if err != nil {
+				return fmt.Errorf("material[%d] sha256: %w", i, err)
+			}
+			// If server already has this sha for the form, skip the upload —
+			// same outcome, fewer bytes on the wire.
+			var mat *api.Material
+			dedup := false
+			for j := range existing {
+				if strings.EqualFold(existing[j].SHA256, localSHA) {
+					mat = &existing[j]
+					dedup = true
+					break
+				}
+			}
+			if mat == nil {
+				up, err := c.MaterialUpload(slug, resolved, m.Label)
+				if err != nil {
+					return fmt.Errorf("upload %s: %w", resolved, err)
+				}
+				mat = up
+			}
+			tag := ""
+			if dedup {
+				tag = "  [dedup]"
+			}
+			fmt.Fprintf(os.Stderr, "material  %d/%d  upload  %s (%s)  → sha %s (id %d)%s\n",
+				idx, total, m.Path, humanSize(size), shortSHA(mat.SHA256), mat.ID, tag)
+			wanted[strings.ToLower(mat.SHA256)] = true
+			continue
+		}
+		// sha256 reference: validate it exists on the form.
+		want := strings.ToLower(m.SHA256)
+		var have *api.Material
+		for j := range existing {
+			if strings.EqualFold(existing[j].SHA256, m.SHA256) {
+				have = &existing[j]
+				break
+			}
+		}
+		if have == nil {
+			// Refresh — a prior upload may have just added it.
+			cur, err := c.MaterialsList(slug)
+			if err != nil {
+				return fmt.Errorf("re-list materials: %w", err)
+			}
+			for j := range cur {
+				if strings.EqualFold(cur[j].SHA256, m.SHA256) {
+					have = &cur[j]
+					existing = cur
+					break
+				}
+			}
+		}
+		if have == nil {
+			return fmt.Errorf("material[%d]: sha256 %s not present on form %q — upload it first with `path:`",
+				i, m.SHA256, slug)
+		}
+		fmt.Fprintf(os.Stderr, "material  %d/%d  ref     sha %s  ok (id %d)\n",
+			idx, total, shortSHA(have.SHA256), have.ID)
+		wanted[want] = true
+	}
+
+	if existing != nil {
+		for _, m := range existing {
+			if !wanted[strings.ToLower(m.SHA256)] {
+				if err := c.MaterialDelete(slug, m.ID); err != nil {
+					return fmt.Errorf("delete material %d (%s): %w", m.ID, shortSHA(m.SHA256), err)
+				}
+				fmt.Fprintf(os.Stderr, "material  --   delete  id %d  sha %s\n", m.ID, shortSHA(m.SHA256))
+			}
+		}
+	}
+	return nil
+}
+
+func fileSHA256(path string) (string, int64, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", 0, err
+	}
+	defer f.Close()
+	h := sha256.New()
+	n, err := io.Copy(h, f)
+	if err != nil {
+		return "", 0, err
+	}
+	return hex.EncodeToString(h.Sum(nil)), n, nil
+}
+
+func shortSHA(s string) string {
+	if len(s) < 8 {
+		return s
+	}
+	return s[:8] + "…"
+}
+
+func humanSize(n int64) string {
+	switch {
+	case n < 1024:
+		return fmt.Sprintf("%d B", n)
+	case n < 1024*1024:
+		return fmt.Sprintf("%.1f KB", float64(n)/1024)
+	case n < 1024*1024*1024:
+		return fmt.Sprintf("%.1f MB", float64(n)/(1024*1024))
+	default:
+		return fmt.Sprintf("%.1f GB", float64(n)/(1024*1024*1024))
+	}
 }
