@@ -148,10 +148,26 @@ RESPONSES
   fetch     <blob-id> [-o FILE]  save a blob to disk
                                  (default filename from server Content-Disposition)
 
+MATERIALS (admin-uploaded reference documents attached to a form,
+rendered in the public gallery beside the filler UI)
+  materials <slug>                            list materials for a form
+                                              (ID, LABEL, FILENAME, MIME, SIZE, SHA256)
+  materials <slug> add PATH [--label LABEL]   upload a single file (PATH is CWD-relative)
+                                              server dedups by (form, sha256)
+  materials <slug> rm <material-id>           delete a material
+  materials <slug> fetch <id> [-o FILE]       download to disk
+                                              (default filename from server Content-Disposition)
+
 YAML SCHEMA (for 'create -f FILE.yaml')
   slug: <slug-str>              url-safe; unique per instance
   title: <str>                  shown as page title on public form
   description: <markdown-str>   rendered above fields
+  materials:                    optional; reference documents to attach
+    - path: <rel-or-abs-path>   YAML-dir-relative; uploaded on create/edit
+      label: <str>              optional; defaults to filename
+    - sha256: <hex>             reference an already-uploaded blob by digest
+      label: <str>              optional
+    (exactly one of path or sha256 per entry)
   fields:
     - name: <machine_key>       [a-z_][a-z0-9_]*
       label: <human-visible>
@@ -196,7 +212,11 @@ EXAMPLES
     → prints https://f.kelliher.info/<token> — text this to Noah
   gforms tokens wfh-rol-2026              # audit who has open links
   gforms responses wfh-rol-2026 --json | jq '.[] | .answers.legal_name'
-  gforms fetch 42 -o noah-signature.svg   # download a signature blob`)
+  gforms fetch 42 -o noah-signature.svg   # download a signature blob
+
+  # YAML with mixed local + sha entries
+  gforms create -f wfh-rol.yaml     # uploads ./frank/rol.docx, references existing shas
+  gforms materials wfh-rol-2026     # audit`)
 }
 
 // hushClient returns a live hush client or a helpful error.
