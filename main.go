@@ -95,29 +95,103 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, `usage: gforms <command> [args...]
+	fmt.Fprintln(os.Stderr, `gforms — CLI for the gluck-forms service (auth'd forms w/ per-form SAS URLs)
 
-auth:
+USAGE
+  gforms <command> [args...]
+
+BACKGROUND
+  Two hosts back one service:
+    forms.kelliher.info   admin API (Authelia 2FA; requires the
+                          'gluck-forms-admin' lldap group)
+    f.kelliher.info       public form filler; URL is f.kelliher.info/<token>
+
+  Admin commands here use OIDC device-flow (RFC 8628) against
+  auth.kelliher.info. On first use, run 'gforms login' — you'll get a
+  code + URL, open the URL in a browser, complete 2FA, confirm the
+  code. Tokens are stored age-encrypted in the hush agent; refresh is
+  automatic on 401. Requires 'hush up -d' to be running.
+
+AUTH
   login                          authenticate via device flow, store tokens in hush
   logout                         forget the stored refresh token
   whoami                         print the current user + groups
 
-forms:
+FORMS
   create   -f FILE.yaml          load form from YAML, POST /forms
+                                 (yaml schema below; ord auto-assigned)
   edit     <slug>                GET form → $EDITOR (YAML) → PUT form
-  show     <slug>                pretty-print a form
-  freeze   <slug>                freeze a form (no further edits)
+                                 (allowed only while frozen=false)
+  show     <slug>                pretty-print a form as JSON
+  freeze   <slug>                lock a form; no further edits
+                                 (one-way; existing tokens keep working)
   list                           list all forms
 
-tokens (SAS URLs):
-  mint     <slug> [--hint N] [--days D] [--uses U]
-  tokens   <slug>                list tokens for a form
-  revoke   <token-id>            revoke a token
+TOKENS (SAS URLS)
+  mint     <slug> [flags]        mint a new capability URL for one form
+     --hint STRING               admin-visible label (e.g. "noah")
+     --days INT                  lifetime in days (default 30)
+     --uses INT                  max uses (default: unlimited-within-expiry)
+                                 → prints raw token + full URL EXACTLY ONCE.
+                                   only sha256(token) is stored server-side.
+  tokens   <slug>                list tokens for a form (hint/uses/expiry)
+  revoke   <token-id>            revoke a token (still counted, but 410 on use)
 
-responses:
-  responses <slug> [--json]      list responses for a form
-  response  <id>                 show one response as JSON
-  fetch     <blob-id> [-o FILE]  save a blob to disk`)
+RESPONSES
+  responses <slug> [--json]      list responses for a form (table or JSON)
+  response  <id>                 show one response as JSON (answers + blob refs)
+  fetch     <blob-id> [-o FILE]  save a blob to disk
+                                 (default filename from server Content-Disposition)
+
+YAML SCHEMA (for 'create -f FILE.yaml')
+  slug: <slug-str>              url-safe; unique per instance
+  title: <str>                  shown as page title on public form
+  description: <markdown-str>   rendered above fields
+  fields:
+    - name: <machine_key>       [a-z_][a-z0-9_]*
+      label: <human-visible>
+      description: <help-text>  optional
+      required: true|false      default true
+      kind: <see below>
+      config: { … kind-specific … }
+
+FIELD KINDS + CONFIG
+  short_text     config: { max_length: 200, pattern?: <regex> }
+  long_text      config: { max_length: 5000, min_length?: N }
+  email          config: { max_length: 200 }
+  phone          config: { }
+  date           config: { min?: "YYYY-MM-DD", max?: "YYYY-MM-DD" }
+  radio          config: { options: [ {value, label}, … ] }
+  multiselect    config: { options: [ {value, label}, … ] }
+  checkbox       config: { must_check: true }   (rejects false when required)
+  signature      config: { mode: "drawn"|"typed"|"both" }
+                 → drawn stored as SVG blob; typed inline in answers JSON
+  file           config: { accept: ["application/pdf","image/*"], max_size_mb: 25 }
+  markdown       config: { content: <markdown-str> }   (display only; no answer)
+
+ENVIRONMENT OVERRIDES (all optional)
+  GFORMS_API         default: https://forms.kelliher.info
+  GFORMS_ISSUER      default: https://auth.kelliher.info
+  GFORMS_CLIENT_ID   default: gforms-cli
+  GFORMS_HUSH_NAME   default: gforms
+  GFORMS_TOKEN       raw bearer JWT (escape hatch; bypasses hush)
+  EDITOR             used by 'edit' (default: vi)
+
+ERRORS
+  Non-2xx responses exit non-zero and print the server's JSON error to stderr.
+  A 401 triggers an automatic hush refresh and one retry; if that still 401s,
+  run 'gforms login' again.
+
+EXAMPLES
+  hush up -d                              # prerequisite once per session
+  gforms login                            # first-run auth
+  gforms create -f wfh-rol.yaml           # define a form from YAML
+  gforms freeze wfh-rol-2026              # lock it
+  gforms mint wfh-rol-2026 --hint noah --days 30
+    → prints https://f.kelliher.info/<token> — text this to Noah
+  gforms tokens wfh-rol-2026              # audit who has open links
+  gforms responses wfh-rol-2026 --json | jq '.[] | .answers.legal_name'
+  gforms fetch 42 -o noah-signature.svg   # download a signature blob`)
 }
 
 // hushClient returns a live hush client or a helpful error.
