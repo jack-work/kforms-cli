@@ -6,6 +6,7 @@ package form
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"gopkg.in/yaml.v3"
 
@@ -22,23 +23,69 @@ type yamlField struct {
 	Config   map[string]any `yaml:"config,omitempty"`
 }
 
-type yamlForm struct {
-	Slug        string      `yaml:"slug"`
-	Title       string      `yaml:"title"`
-	Description string      `yaml:"description,omitempty"`
-	Fields      []yamlField `yaml:"fields"`
+// yamlMaterial mirrors one entry in the top-level `materials:` array.
+// Exactly one of Path/SHA256 must be set. Label is optional.
+type yamlMaterial struct {
+	Path   string `yaml:"path,omitempty"`
+	SHA256 string `yaml:"sha256,omitempty"`
+	Label  string `yaml:"label,omitempty"`
 }
 
-// LoadYAML reads and parses a form YAML file.
-func LoadYAML(path string) (*api.Form, error) {
+type yamlForm struct {
+	Slug        string         `yaml:"slug"`
+	Title       string         `yaml:"title"`
+	Description string         `yaml:"description,omitempty"`
+	Materials   []yamlMaterial `yaml:"materials,omitempty"`
+	Fields      []yamlField    `yaml:"fields"`
+}
+
+// MaterialSpec is a parsed entry from the YAML materials array. Exactly
+// one of Path or SHA256 is non-empty (Validate enforces this).
+type MaterialSpec struct {
+	Path   string
+	SHA256 string
+	Label  string
+}
+
+// Doc is a parsed form YAML: the API-shaped form plus its materials
+// sidecar. Materials are managed via a separate endpoint, so we keep
+// them out of api.Form and hand them back alongside.
+type Doc struct {
+	Form      *api.Form
+	Materials []MaterialSpec
+	// BaseDir is the directory of the YAML file (or "" when parsed from
+	// bytes). Callers use it to resolve relative material paths.
+	BaseDir string
+}
+
+// LoadDoc reads and parses a form YAML file.
+func LoadDoc(path string) (*Doc, error) {
 	bs, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("read %s: %w", path, err)
 	}
-	return ParseYAML(bs)
+	d, err := ParseDoc(bs)
+	if err != nil {
+		return nil, err
+	}
+	abs, err := filepath.Abs(path)
+	if err == nil {
+		d.BaseDir = filepath.Dir(abs)
+	}
+	return d, nil
 }
 
-func ParseYAML(bs []byte) (*api.Form, error) {
+// LoadYAML is a thin wrapper preserved for any callers that only want
+// the form portion. Prefer LoadDoc.
+func LoadYAML(path string) (*api.Form, error) {
+	d, err := LoadDoc(path)
+	if err != nil {
+		return nil, err
+	}
+	return d.Form, nil
+}
+
+func ParseDoc(bs []byte) (*Doc, error) {
 	var y yamlForm
 	if err := yaml.Unmarshal(bs, &y); err != nil {
 		return nil, fmt.Errorf("parse yaml: %w", err)
@@ -49,43 +96,89 @@ func ParseYAML(bs []byte) (*api.Form, error) {
 	if y.Title == "" {
 		return nil, fmt.Errorf("form yaml missing required field: title")
 	}
-	out := &api.Form{
+	f := &api.Form{
 		Slug:        y.Slug,
 		Title:       y.Title,
 		Description: y.Description,
 		Fields:      make([]api.Field, 0, len(y.Fields)),
 	}
-	for i, f := range y.Fields {
-		if f.Name == "" {
+	for i, fld := range y.Fields {
+		if fld.Name == "" {
 			return nil, fmt.Errorf("field[%d] missing name", i)
 		}
-		if f.Kind == "" {
-			return nil, fmt.Errorf("field[%d] (%s) missing kind", i, f.Name)
+		if fld.Kind == "" {
+			return nil, fmt.Errorf("field[%d] (%s) missing kind", i, fld.Name)
 		}
 		required := true
-		if f.Required != nil {
-			required = *f.Required
+		if fld.Required != nil {
+			required = *fld.Required
 		}
-		out.Fields = append(out.Fields, api.Field{
-			Name:     f.Name,
-			Label:    f.Label,
-			Kind:     f.Kind,
+		f.Fields = append(f.Fields, api.Field{
+			Name:     fld.Name,
+			Label:    fld.Label,
+			Kind:     fld.Kind,
 			Required: required,
-			Config:   f.Config,
+			Config:   fld.Config,
 		})
 	}
-	return out, nil
+	mats := make([]MaterialSpec, 0, len(y.Materials))
+	for i, m := range y.Materials {
+		hasPath := m.Path != ""
+		hasSHA := m.SHA256 != ""
+		if hasPath == hasSHA {
+			return nil, fmt.Errorf("materials[%d]: exactly one of path or sha256 must be set", i)
+		}
+		mats = append(mats, MaterialSpec{
+			Path:   m.Path,
+			SHA256: m.SHA256,
+			Label:  m.Label,
+		})
+	}
+	return &Doc{Form: f, Materials: mats}, nil
 }
 
-// DumpYAML serializes a Form back to YAML for the edit-in-$EDITOR flow.
-// Required is emitted only when it's false — matches the input dialect.
-func DumpYAML(f *api.Form) ([]byte, error) {
-	y := yamlForm{
-		Slug:        f.Slug,
-		Title:       f.Title,
-		Description: f.Description,
+// ParseYAML preserves the old surface for form-only callers.
+func ParseYAML(bs []byte) (*api.Form, error) {
+	d, err := ParseDoc(bs)
+	if err != nil {
+		return nil, err
 	}
-	for _, fld := range f.Fields {
+	return d.Form, nil
+}
+
+// ResolvedPath returns the absolute filesystem path for a material's
+// Path field, resolved relative to the YAML file's directory. If Path
+// is already absolute it is returned unchanged. Returns "" for
+// sha-only entries.
+func (m MaterialSpec) ResolvedPath(baseDir string) string {
+	if m.Path == "" {
+		return ""
+	}
+	if filepath.IsAbs(m.Path) {
+		return m.Path
+	}
+	if baseDir == "" {
+		return m.Path
+	}
+	return filepath.Join(baseDir, m.Path)
+}
+
+// DumpDoc serializes a form + materials back to YAML for the
+// edit-in-$EDITOR flow.
+func DumpDoc(d *Doc) ([]byte, error) {
+	y := yamlForm{
+		Slug:        d.Form.Slug,
+		Title:       d.Form.Title,
+		Description: d.Form.Description,
+	}
+	for _, m := range d.Materials {
+		y.Materials = append(y.Materials, yamlMaterial{
+			Path:   m.Path,
+			SHA256: m.SHA256,
+			Label:  m.Label,
+		})
+	}
+	for _, fld := range d.Form.Fields {
 		yf := yamlField{
 			Name:   fld.Name,
 			Label:  fld.Label,
@@ -99,4 +192,9 @@ func DumpYAML(f *api.Form) ([]byte, error) {
 		y.Fields = append(y.Fields, yf)
 	}
 	return yaml.Marshal(&y)
+}
+
+// DumpYAML preserves the old form-only surface.
+func DumpYAML(f *api.Form) ([]byte, error) {
+	return DumpDoc(&Doc{Form: f})
 }
