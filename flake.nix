@@ -1,5 +1,5 @@
 {
-  description = "gforms-cli — CLI for the gluck-forms API";
+  description = "kforms-cli — CLI for the gluck-forms API";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
@@ -27,7 +27,7 @@
         default = pkgs.mkShell {
           packages = with pkgs; [ go gopls git ];
           shellHook = ''
-            echo "gforms-cli dev shell — try: go build ./..."
+            echo "kforms-cli dev shell — try: go build ./..."
           '';
         };
       });

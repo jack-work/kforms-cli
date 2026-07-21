@@ -10,7 +10,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/jack-work/gforms-cli/internal/api"
+	"github.com/jack-work/kforms-cli/internal/api"
 )
 
 // yamlField mirrors the on-disk shape. Required is a *bool so we can

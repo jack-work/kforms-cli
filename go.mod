@@ -1,4 +1,4 @@
-module github.com/jack-work/gforms-cli
+module github.com/jack-work/kforms-cli
 
 go 1.25.5
 

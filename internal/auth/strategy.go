@@ -43,7 +43,7 @@ func (a *Aggregate) Resolve() (string, error) {
 	if firstErr != nil {
 		return "", fmt.Errorf("no credential available; first strategy error: %w", firstErr)
 	}
-	return "", errors.New("no credential available (run: gforms login)")
+	return "", errors.New("no credential available (run: kforms login)")
 }
 
 func (a *Aggregate) Invalidate(token string) error {
@@ -104,7 +104,7 @@ func (o *OAuth) Invalidate(token string) error {
 		return nil
 	}
 	if errors.Is(err, hush.ErrOAuthRefreshPermanent) {
-		return fmt.Errorf("oauth refresh for %q rejected (run: gforms login): %w", o.Name, err)
+		return fmt.Errorf("oauth refresh for %q rejected (run: kforms login): %w", o.Name, err)
 	}
 	return fmt.Errorf("oauth refresh for %q: %w", o.Name, err)
 }

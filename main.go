@@ -1,4 +1,4 @@
-// gforms CLI. Subcommands live in one file for the same reason
+// kforms CLI. Subcommands live in one file for the same reason
 // gluck-todo-cli does — small surface, easy to grep.
 //
 // Auth model in one paragraph: `login` runs OAuth's RFC 8628 device
@@ -25,9 +25,9 @@ import (
 
 	hush "github.com/jack-work/hush/client"
 
-	"github.com/jack-work/gforms-cli/internal/api"
-	"github.com/jack-work/gforms-cli/internal/auth"
-	"github.com/jack-work/gforms-cli/internal/form"
+	"github.com/jack-work/kforms-cli/internal/api"
+	"github.com/jack-work/kforms-cli/internal/auth"
+	"github.com/jack-work/kforms-cli/internal/form"
 )
 
 func envDefault(key, def string) string {
@@ -38,11 +38,11 @@ func envDefault(key, def string) string {
 }
 
 var (
-	apiBase   = envDefault("GFORMS_API", "https://forms.kelliher.info")
-	issuer    = envDefault("GFORMS_ISSUER", "https://auth.kelliher.info")
-	clientID  = envDefault("GFORMS_CLIENT_ID", "gforms-cli")
-	hushName  = envDefault("GFORMS_HUSH_NAME", "gforms")
-	envTokVar = "GFORMS_TOKEN"
+	apiBase   = envDefault("KFORMS_API", "https://forms.kelliher.info")
+	issuer    = envDefault("KFORMS_ISSUER", "https://auth.kelliher.info")
+	clientID  = envDefault("KFORMS_CLIENT_ID", "kforms-cli")
+	hushName  = envDefault("KFORMS_HUSH_NAME", "kforms")
+	envTokVar = "KFORMS_TOKEN"
 	scopes    = "openid profile groups offline_access"
 )
 
@@ -100,10 +100,10 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, `gforms — CLI for the gluck-forms service (auth'd forms w/ per-form SAS URLs)
+	fmt.Fprintln(os.Stderr, `kforms — CLI for the gluck-forms service (auth'd forms w/ per-form SAS URLs)
 
 USAGE
-  gforms <command> [args...]
+  kforms <command> [args...]
 
 BACKGROUND
   Two hosts back one service:
@@ -112,7 +112,7 @@ BACKGROUND
     f.kelliher.info       public form filler; URL is f.kelliher.info/<token>
 
   Admin commands here use OIDC device-flow (RFC 8628) against
-  auth.kelliher.info. On first use, run 'gforms login' — you'll get a
+  auth.kelliher.info. On first use, run 'kforms login' — you'll get a
   code + URL, open the URL in a browser, complete 2FA, confirm the
   code. Tokens are stored age-encrypted in the hush agent; refresh is
   automatic on 401. Requires 'hush up -d' to be running.
@@ -191,32 +191,32 @@ FIELD KINDS + CONFIG
   markdown       config: { content: <markdown-str> }   (display only; no answer)
 
 ENVIRONMENT OVERRIDES (all optional)
-  GFORMS_API         default: https://forms.kelliher.info
-  GFORMS_ISSUER      default: https://auth.kelliher.info
-  GFORMS_CLIENT_ID   default: gforms-cli
-  GFORMS_HUSH_NAME   default: gforms
-  GFORMS_TOKEN       raw bearer JWT (escape hatch; bypasses hush)
+  KFORMS_API         default: https://forms.kelliher.info
+  KFORMS_ISSUER      default: https://auth.kelliher.info
+  KFORMS_CLIENT_ID   default: kforms-cli
+  KFORMS_HUSH_NAME   default: kforms
+  KFORMS_TOKEN       raw bearer JWT (escape hatch; bypasses hush)
   EDITOR             used by 'edit' (default: vi)
 
 ERRORS
   Non-2xx responses exit non-zero and print the server's JSON error to stderr.
   A 401 triggers an automatic hush refresh and one retry; if that still 401s,
-  run 'gforms login' again.
+  run 'kforms login' again.
 
 EXAMPLES
   hush up -d                              # prerequisite once per session
-  gforms login                            # first-run auth
-  gforms create -f wfh-rol.yaml           # define a form from YAML
-  gforms freeze wfh-rol-2026              # lock it
-  gforms mint wfh-rol-2026 --hint noah --days 30
+  kforms login                            # first-run auth
+  kforms create -f wfh-rol.yaml           # define a form from YAML
+  kforms freeze wfh-rol-2026              # lock it
+  kforms mint wfh-rol-2026 --hint noah --days 30
     → prints https://f.kelliher.info/<token> — text this to Noah
-  gforms tokens wfh-rol-2026              # audit who has open links
-  gforms responses wfh-rol-2026 --json | jq '.[] | .answers.legal_name'
-  gforms fetch 42 -o noah-signature.svg   # download a signature blob
+  kforms tokens wfh-rol-2026              # audit who has open links
+  kforms responses wfh-rol-2026 --json | jq '.[] | .answers.legal_name'
+  kforms fetch 42 -o noah-signature.svg   # download a signature blob
 
   # YAML with mixed local + sha entries
-  gforms create -f wfh-rol.yaml     # uploads ./frank/rol.docx, references existing shas
-  gforms materials wfh-rol-2026     # audit`)
+  kforms create -f wfh-rol.yaml     # uploads ./frank/rol.docx, references existing shas
+  kforms materials wfh-rol-2026     # audit`)
 }
 
 // hushClient returns a live hush client or a helpful error.
@@ -347,11 +347,11 @@ func cmdCreate() error {
 		case strings.HasPrefix(a, "--file="):
 			path = strings.TrimPrefix(a, "--file=")
 		default:
-			return fmt.Errorf("unknown arg: %s (usage: gforms create -f FILE.yaml)", a)
+			return fmt.Errorf("unknown arg: %s (usage: kforms create -f FILE.yaml)", a)
 		}
 	}
 	if path == "" {
-		return fmt.Errorf("usage: gforms create -f FILE.yaml")
+		return fmt.Errorf("usage: kforms create -f FILE.yaml")
 	}
 	f, err := form.LoadDoc(path)
 	if err != nil {
@@ -373,7 +373,7 @@ func cmdCreate() error {
 
 func cmdEdit() error {
 	if len(os.Args) < 2 {
-		return fmt.Errorf("usage: gforms edit <slug>")
+		return fmt.Errorf("usage: kforms edit <slug>")
 	}
 	slug := os.Args[1]
 	c, err := newAPIClient()
@@ -401,7 +401,7 @@ func cmdEdit() error {
 		return err
 	}
 	// Round-trip through a temp file so the user can back out with :q!.
-	tmp, err := os.CreateTemp("", "gforms-*.yaml")
+	tmp, err := os.CreateTemp("", "kforms-*.yaml")
 	if err != nil {
 		return err
 	}
@@ -447,7 +447,7 @@ func cmdEdit() error {
 
 func cmdShow() error {
 	if len(os.Args) < 2 {
-		return fmt.Errorf("usage: gforms show <slug>")
+		return fmt.Errorf("usage: kforms show <slug>")
 	}
 	slug := os.Args[1]
 	c, err := newAPIClient()
@@ -463,7 +463,7 @@ func cmdShow() error {
 
 func cmdFreeze() error {
 	if len(os.Args) < 2 {
-		return fmt.Errorf("usage: gforms freeze <slug>")
+		return fmt.Errorf("usage: kforms freeze <slug>")
 	}
 	slug := os.Args[1]
 	c, err := newAPIClient()
@@ -503,7 +503,7 @@ func cmdList() error {
 func cmdMint() error {
 	args := os.Args[1:]
 	if len(args) < 1 {
-		return fmt.Errorf("usage: gforms mint <slug> [--hint NAME] [--days N] [--uses N]")
+		return fmt.Errorf("usage: kforms mint <slug> [--hint NAME] [--days N] [--uses N]")
 	}
 	slug := args[0]
 	req := api.MintReq{}
@@ -568,7 +568,7 @@ func cmdMint() error {
 
 func cmdTokens() error {
 	if len(os.Args) < 2 {
-		return fmt.Errorf("usage: gforms tokens <slug>")
+		return fmt.Errorf("usage: kforms tokens <slug>")
 	}
 	slug := os.Args[1]
 	c, err := newAPIClient()
@@ -597,7 +597,7 @@ func cmdTokens() error {
 
 func cmdRevoke() error {
 	if len(os.Args) < 2 {
-		return fmt.Errorf("usage: gforms revoke <token-id>")
+		return fmt.Errorf("usage: kforms revoke <token-id>")
 	}
 	id := os.Args[1]
 	c, err := newAPIClient()
@@ -615,7 +615,7 @@ func cmdRevoke() error {
 
 func cmdResponses() error {
 	if len(os.Args) < 2 {
-		return fmt.Errorf("usage: gforms responses <slug> [--json]")
+		return fmt.Errorf("usage: kforms responses <slug> [--json]")
 	}
 	slug := os.Args[1]
 	jsonOut := false
@@ -709,7 +709,7 @@ func sortStrings(ss []string) {
 
 func cmdResponse() error {
 	if len(os.Args) < 2 {
-		return fmt.Errorf("usage: gforms response <id>")
+		return fmt.Errorf("usage: kforms response <id>")
 	}
 	id := os.Args[1]
 	c, err := newAPIClient()
@@ -726,7 +726,7 @@ func cmdResponse() error {
 func cmdFetch() error {
 	args := os.Args[1:]
 	if len(args) < 1 {
-		return fmt.Errorf("usage: gforms fetch <blob-id> [-o FILE]")
+		return fmt.Errorf("usage: kforms fetch <blob-id> [-o FILE]")
 	}
 	id := args[0]
 	dst := ""
@@ -894,12 +894,12 @@ func humanSize(n int64) string {
 
 // ── materials subcommands ─────────────────────────────────────────────
 
-// cmdMaterials dispatches `gforms materials <slug> [subcmd] ...`.
+// cmdMaterials dispatches `kforms materials <slug> [subcmd] ...`.
 // With just a slug it lists; otherwise the second arg picks a verb.
 func cmdMaterials() error {
 	args := os.Args[1:]
 	if len(args) < 1 {
-		return fmt.Errorf("usage: gforms materials <slug> [add PATH [--label L] | rm <id> | fetch <id> [-o FILE]]")
+		return fmt.Errorf("usage: kforms materials <slug> [add PATH [--label L] | rm <id> | fetch <id> [-o FILE]]")
 	}
 	slug := args[0]
 	if len(args) == 1 {
@@ -943,7 +943,7 @@ func materialsList(slug string) error {
 
 func materialsAdd(slug string, args []string) error {
 	if len(args) < 1 {
-		return fmt.Errorf("usage: gforms materials <slug> add PATH [--label LABEL]")
+		return fmt.Errorf("usage: kforms materials <slug> add PATH [--label LABEL]")
 	}
 	path := args[0]
 	label := ""
@@ -978,7 +978,7 @@ func materialsAdd(slug string, args []string) error {
 
 func materialsRm(slug string, args []string) error {
 	if len(args) < 1 {
-		return fmt.Errorf("usage: gforms materials <slug> rm <material-id>")
+		return fmt.Errorf("usage: kforms materials <slug> rm <material-id>")
 	}
 	id, err := strconv.ParseInt(args[0], 10, 64)
 	if err != nil {
@@ -997,7 +997,7 @@ func materialsRm(slug string, args []string) error {
 
 func materialsFetch(slug string, args []string) error {
 	if len(args) < 1 {
-		return fmt.Errorf("usage: gforms materials <slug> fetch <id> [-o FILE]")
+		return fmt.Errorf("usage: kforms materials <slug> fetch <id> [-o FILE]")
 	}
 	_ = slug // slug is context; admin fetch is by material id only.
 	id, err := strconv.ParseInt(args[0], 10, 64)
@@ -1025,7 +1025,7 @@ func materialsFetch(slug string, args []string) error {
 		return err
 	}
 	// Two-pass: stream to a temp file so we can honor the server's filename.
-	tmp, err := os.CreateTemp("", "gforms-material-*")
+	tmp, err := os.CreateTemp("", "kforms-material-*")
 	if err != nil {
 		return err
 	}

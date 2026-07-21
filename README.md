@@ -1,4 +1,4 @@
-# gforms — CLI
+# kforms — CLI
 
 A small CLI for [gluck-forms](https://github.com/jack-work/gluck-forms),
 authenticated against [Authelia](https://auth.kelliher.info) via OIDC's
@@ -6,20 +6,20 @@ RFC 8628 device authorization flow, with the resulting refresh token
 stored in the [hush](https://github.com/jack-work/hush) agent.
 
 ```
-gforms login                             # RFC 8628 device flow → hush stores refresh
-gforms whoami                            # who does the API think you are?
-gforms create   -f rol.yaml              # POST /forms from a YAML file
-gforms edit     <slug>                   # GET → $EDITOR (YAML) → PUT
-gforms show     <slug>                   # pretty-print
-gforms freeze   <slug>                   # POST /forms/<slug>/freeze
-gforms list                              # GET /forms (tabwriter)
-gforms mint     <slug> [--hint N] [--days D] [--uses U]
-gforms tokens   <slug>                   # list SAS tokens
-gforms revoke   <token-id>               # POST /tokens/<id>/revoke
-gforms responses <slug> [--json]         # list responses
-gforms response  <id>                    # one response as JSON
-gforms fetch     <blob-id> [-o FILE]     # save a blob to disk
-gforms logout
+kforms login                             # RFC 8628 device flow → hush stores refresh
+kforms whoami                            # who does the API think you are?
+kforms create   -f rol.yaml              # POST /forms from a YAML file
+kforms edit     <slug>                   # GET → $EDITOR (YAML) → PUT
+kforms show     <slug>                   # pretty-print
+kforms freeze   <slug>                   # POST /forms/<slug>/freeze
+kforms list                              # GET /forms (tabwriter)
+kforms mint     <slug> [--hint N] [--days D] [--uses U]
+kforms tokens   <slug>                   # list SAS tokens
+kforms revoke   <token-id>               # POST /tokens/<id>/revoke
+kforms responses <slug> [--json]         # list responses
+kforms response  <id>                    # one response as JSON
+kforms fetch     <blob-id> [-o FILE]     # save a blob to disk
+kforms logout
 ```
 
 Sibling of [`gluck-todo-cli`](https://github.com/jack-work/gluck-todo-cli);
@@ -27,7 +27,7 @@ identical auth model.
 
 ## Auth model
 
-1. `gforms login` calls Authelia's device authorization endpoint. Authelia
+1. `kforms login` calls Authelia's device authorization endpoint. Authelia
    returns a `user_code`; the CLI prints it and a verification URL. Open
    that URL on any device with a browser, authenticate, and confirm the
    user code.
@@ -39,7 +39,7 @@ identical auth model.
    against Authelia's JWKS.
 4. On a `401` the CLI calls `OAuthRefresh` on hush and retries once.
    If the refresh token itself is rejected, the CLI tells you to
-   `gforms login` again.
+   `kforms login` again.
 
 ## Prerequisites
 
@@ -51,11 +51,11 @@ Environment variables (all optional, sensible defaults):
 
 | Var                 | Default                        |
 |---------------------|--------------------------------|
-| `GFORMS_API`        | `https://forms.kelliher.info`  |
-| `GFORMS_ISSUER`     | `https://auth.kelliher.info`   |
-| `GFORMS_CLIENT_ID`  | `gforms-cli`                   |
-| `GFORMS_HUSH_NAME`  | `gforms`                       |
-| `GFORMS_TOKEN`      | *(escape hatch; overrides hush)* |
+| `KFORMS_API`        | `https://forms.kelliher.info`  |
+| `KFORMS_ISSUER`     | `https://auth.kelliher.info`   |
+| `KFORMS_CLIENT_ID`  | `kforms-cli`                   |
+| `KFORMS_HUSH_NAME`  | `kforms`                       |
+| `KFORMS_TOKEN`      | *(escape hatch; overrides hush)* |
 
 ## YAML form format
 
