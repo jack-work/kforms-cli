@@ -40,7 +40,7 @@ func envDefault(key, def string) string {
 var (
 	apiBase   = envDefault("KFORMS_API", "https://forms.kelliher.info")
 	issuer    = envDefault("KFORMS_ISSUER", "https://auth.kelliher.info")
-	clientID  = envDefault("KFORMS_CLIENT_ID", "kforms-cli")
+	clientID  = envDefault("KFORMS_CLIENT_ID", "gforms-cli")
 	hushName  = envDefault("KFORMS_HUSH_NAME", "gforms")
 	envTokVar = "KFORMS_TOKEN"
 	scopes    = "openid profile groups offline_access"
