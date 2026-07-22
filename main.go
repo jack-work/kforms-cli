@@ -108,7 +108,7 @@ USAGE
 BACKGROUND
   Two hosts back one service:
     forms.kelliher.info   admin API (Authelia 2FA; requires the
-                          'gluck-forms-admin' lldap group)
+                          'forms-admin' lldap group)
     f.kelliher.info       public form filler; URL is f.kelliher.info/<token>
 
   Admin commands here use OIDC device-flow (RFC 8628) against
